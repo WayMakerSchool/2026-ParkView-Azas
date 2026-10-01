@@ -4,7 +4,7 @@ ParkView는 기기 카메라 또는 설치형 CCTV의 YOLO 객체 감지 결과�
 
 ## 학교 저장소
 
-- 이 저장소는 웹 앱 소스와 `hardware/`의 Raspberry Pi/카메라 서버 코드를 보관합니다. 학교 저장소의 GitHub Pages 배포는 사용하지 않습니다.
+- 이 저장소는 웹 앱 소스와 `hardware/`의 Raspberry Pi/카메라 서버 코드를 보관합니다. 웹 앱은 `vercel.json`에 따라 Vercel에서 `dist/`만 배포하며, 학교 저장소의 GitHub Pages는 사용하지 않습니다.
 - 기존 웹 배포는 원본 저장소에서 유지됩니다: https://jaden70749.github.io/ParkView/
 - RTSP 주소, 관리자 토큰, API 키와 카메라 설정 파일은 저장소에 올리지 않습니다.
 
