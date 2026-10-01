@@ -1,0 +1,14 @@
+.env
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+debug/
+backups/
+.codex-stage/
+node_modules/
+dist/
+datasets/
+runs/
+.occupancy-references/
+.parkview-camera-settings.json
