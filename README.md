@@ -2,13 +2,11 @@
 
 ParkView는 기기 카메라 또는 설치형 CCTV의 YOLO 객체 감지 결과를 주차면 좌표와 매칭하고, 웹 지도와 2D 도면에 점유 정보를 표시하는 프로토타입입니다.
 
-## 학교 저장소 배포
+## 학교 저장소
 
-- 웹 앱: https://waymakerschool.github.io/2026-ParkView-Azas/
-- GitHub 저장소의 Settings > Pages에서 Source를 **GitHub Actions**로 설정합니다. `main`에 푸시하면 `.github/workflows/pages.yml`이 배포합니다.
-- 실제 지도를 쓰려면 Actions secret `KAKAO_JAVASCRIPT_KEY`를 설정하고 Kakao Developers에 `https://waymakerschool.github.io` 도메인을 등록합니다. 키가 없으면 대체 지도가 표시됩니다.
-- CCTV 공유 화면은 기존 Render API를 사용합니다. 현장 컴퓨터에서 `start-parkview-public.command`를 실행하고 Render에 동일한 `PARKVIEW_CAMERA_RELAY_SECRET`을 등록해야 원격 프레임이 보입니다. RTSP 주소와 관리자 토큰은 저장소에 올리지 않습니다.
-- 원본 저장소도 계속 배포됩니다: https://jaden70749.github.io/ParkView/
+- 이 저장소는 웹 앱 소스와 `hardware/`의 Raspberry Pi/카메라 서버 코드를 보관합니다. 학교 저장소의 GitHub Pages 배포는 사용하지 않습니다.
+- 기존 웹 배포는 원본 저장소에서 유지됩니다: https://jaden70749.github.io/ParkView/
+- RTSP 주소, 관리자 토큰, API 키와 카메라 설정 파일은 저장소에 올리지 않습니다.
 
 ## 구성
 
