@@ -6,8 +6,16 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "https://parkview-plan-api.onrender.com/api/:path*"
+      "source": "/api/health",
+      "destination": "https://parkview-plan-api.onrender.com/api/health"
+    },
+    {
+      "source": "/api/public-config",
+      "destination": "https://parkview-plan-api.onrender.com/api/public-config"
+    },
+    {
+      "source": "/api/camera/:path*",
+      "destination": "https://parkview-plan-api.onrender.com/api/camera/:path*"
     }
   ]
 }
