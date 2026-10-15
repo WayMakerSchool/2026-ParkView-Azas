@@ -32,20 +32,21 @@ test("declined mapping swap preserves both existing links", () => {
   assert.deepEqual(state.slots.map(s => s.slot_index), [0,1]);
 });
 const detection = source.slice(source.indexOf("async function detectRegions()"), source.indexOf("function addCompletedSlot()"));
-function harness({ slots = [], confirm = true, fail = false } = {}) {
+function harness({ slots = [], confirm = true, fail = false, cameraFrame = false } = {}) {
   let requests = 0;
-  const state = { slots, roi: null, image: { naturalWidth: 100, naturalHeight: 100 }, points: [] };
+  let lastRequest = null;
+  const state = { slots, roi: null, image: { naturalWidth: 100, naturalHeight: 100 }, points: [], cameraFrame };
   const els = { detectButton: { disabled: false }, adminToken: { value: "test-token" },
     saveStatus: {}, sourceStatus: {} };
-  const context = vm.createContext({ state, els, setupLotId: "test-lot", AbortSignal,
-    window: { confirm: () => confirm }, render() {}, regionsUrl: () => "/api/regions/detect",
-    authHeaders: headers => headers,
+  const context = vm.createContext({ state, els, setupLotId: "test-lot", AbortSignal, URL,
+    window: { confirm: () => confirm, location: { href: "https://parkview.example/calibrate.html" } }, render() {}, regionsUrl: () => "/api/regions/detect",
+    authHeaders: (headers = {}) => headers,
     document: { createElement: () => ({ getContext: () => ({ drawImage() {} }), toBlob: fn => fn({}) }) },
-    fetch: async () => { requests++; if (fail) throw new Error("offline");
+    fetch: async (url, options) => { requests++; lastRequest = { url, options }; if (fail) throw new Error("offline");
       return { ok: true, json: async () => ({ slots: [{ id: "detected" }] }) }; }
   });
   vm.runInContext(detection, context);
-  return { state, els, run: () => context.detectRegions(), requests: () => requests };
+  return { state, els, run: () => context.detectRegions(), requests: () => requests, lastRequest: () => lastRequest };
 }
 
 test("missing detection region is explained next to the detection button", async () => {
@@ -81,19 +82,41 @@ test("network failure is visible and the button is enabled again", async () => {
   assert.equal(h.els.detectButton.disabled, false);
 });
 
+test("CCTV region detection reuses the server frame instead of uploading the image", async () => {
+  const h = harness({ cameraFrame: true });
+  h.state.roi = [[0,0],[1,0],[1,1],[0,1]];
+  await h.run();
+  assert.match(h.lastRequest().url, /source=camera/);
+  assert.equal(h.lastRequest().options.body, undefined);
+});
+
 test("new calibration opens in region selection mode", () => {
   assert.match(source, /mode: "region"/);
 });
 
-test("hosted calibration redirects to the local CCTV server", () => {
-  assert.match(source, /\["localhost", "127\.0\.0\.1"\]\.includes\(window\.location\.hostname\)/);
-  assert.match(source, /http:\/\/127\.0\.0\.1:5180\/calibrate\.html/);
-  assert.match(source, /window\.location\.replace\(localUrl\.href\)/);
+test("hosted calibration uses the configured camera API without a local redirect", () => {
+  assert.match(source, /window\.PARKVIEW_CONFIG\?\.cameraApiBaseUrl/);
+  assert.doesNotMatch(source, /127\.0\.0\.1:5180/);
+  assert.doesNotMatch(source, /window\.location\.replace/);
 });
 
-test("management calibration link targets the local CCTV server when deployed", async () => {
+test("CCTV connection lives in calibration and reuses the saved administrator token", async () => {
+  const calibrationHtml = await readFile(new URL("../calibrate.html", import.meta.url), "utf8");
+  const appHtml = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  assert.match(calibrationHtml, /id="cameraConnectionForm"/);
+  assert.match(calibrationHtml, /id="cameraRtspUrl"/);
+  assert.match(calibrationHtml, /id="adminToken"/);
+  assert.doesNotMatch(appHtml, /id="cameraConnectionForm"/);
+  assert.doesNotMatch(appHtml, /id="cameraRtspUrl"/);
+  assert.match(source, /parkview\.cameraAdminToken/);
+  assert.match(source, /els\.adminToken\.value = loadAdminToken\(\)/);
+  assert.match(source, /\/api\/camera\/configure/);
+});
+
+test("management calibration link remains on the current deployment", async () => {
   const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
-  assert.match(app, /isLocalCameraHost\(\) \? "\.\/calibrate\.html" : "http:\/\/127\.0\.0\.1:5180\/calibrate\.html"/);
+  assert.match(app, /new URL\("\.\/calibrate\.html", window\.location\.href\)/);
+  assert.doesNotMatch(app, /isLocalCameraHost/);
 });
 
 const training = source.slice(source.indexOf("function defaultTrainingGroup()"), source.indexOf("function authHeaders("));

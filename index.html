@@ -4,11 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f8c400">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="ParkView">
   <title>ParkView</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="stylesheet" href="./styles.css?v=115">
+  <link rel="stylesheet" href="./styles.css?v=118">
 </head>
 <body>
   <main id="app" class="app-shell">
@@ -46,6 +48,38 @@
             </button>
           </div>
           <div id="searchSuggestions" class="search-suggestions" role="listbox" aria-label="장소 검색 결과" hidden></div>
+          <section id="searchDiscovery" class="search-discovery" aria-label="장소 탐색" hidden>
+            <header class="discovery-header">
+              <strong id="discoveryTitle">어디로 갈까요?</strong>
+              <button id="discoveryClose" class="discovery-icon-button" type="button" aria-label="탐색 닫기" title="탐색 닫기"><i data-lucide="x"></i></button>
+            </header>
+            <p id="discoveryStatus" class="discovery-status" role="status" hidden></p>
+            <div id="discoveryHome">
+              <section class="discovery-section">
+                <h2>주변 탐색</h2>
+                <div class="discovery-categories">
+                  <button type="button" data-nearby-category="PK6"><span><i data-lucide="square-parking"></i></span>주차장</button>
+                  <button type="button" data-nearby-category="FD6"><span><i data-lucide="utensils"></i></span>음식점</button>
+                  <button type="button" data-nearby-category="CE7"><span><i data-lucide="coffee"></i></span>카페</button>
+                  <button type="button" data-nearby-category="CS2"><span><i data-lucide="store"></i></span>편의점</button>
+                  <button type="button" data-nearby-category="SW8"><span><i data-lucide="train-front"></i></span>지하철</button>
+                  <button type="button" data-nearby-category="OL7"><span><i data-lucide="fuel"></i></span>주유소</button>
+                </div>
+              </section>
+              <section class="discovery-section">
+                <div class="discovery-section-heading"><h2>내 장소</h2><button id="addSavedPlace" class="discovery-icon-button" type="button" aria-label="자주 가는 장소 추가" title="장소 추가"><i data-lucide="plus"></i></button></div>
+                <div id="discoveryPlaces"></div>
+              </section>
+              <section class="discovery-section">
+                <div class="discovery-section-heading"><h2>즐겨찾기</h2><button id="discoveryAllFavorites" class="discovery-text-button" type="button">전체 보기 <i data-lucide="chevron-right"></i></button></div>
+                <div id="discoveryFavorites"></div>
+              </section>
+              <section class="discovery-section">
+                <div class="discovery-section-heading"><h2>최근 검색</h2><button id="clearRecentSearches" class="discovery-text-button" type="button">전체 삭제</button></div>
+                <div id="discoveryRecent"></div>
+              </section>
+            </div>
+          </section>
           <div class="quick-filter-row" aria-label="빠른 검색 조건">
             <button id="filterButton" class="filter-tool-button" type="button" aria-label="상세 필터 열기" aria-expanded="false">
               <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
@@ -393,7 +427,6 @@
             <label class="form-field"><span>운영 상태</span><select id="managementLotStatusInput"><option value="open">운영</option><option value="closed">마감</option></select></label>
           </div>
           <button id="managementLotSaveButton" class="secondary-button full-width-button" type="button">기본 정보 저장</button>
-          <a id="localCameraSetupLink" class="secondary-button full-width-button" href="http://127.0.0.1:5180/" target="_blank" rel="noopener" hidden>CCTV 연결 컴퓨터에서 설정 열기</a>
           <div class="share-link-row">
             <div><strong>공개 CCTV 링크</strong><small id="cameraShareStatus">카메라 연결 후 생성됩니다.</small></div>
             <button id="cameraShareCopyButton" class="secondary-button" type="button" disabled>링크 복사</button>
@@ -442,25 +475,26 @@
           <button id="deviceCameraToggle" class="device-camera-toggle" type="button" aria-expanded="false" aria-controls="deviceCameraPanel">
             <i data-lucide="scan-line" aria-hidden="true"></i>
             <span>
-              <strong>실시간 주차면 분석</strong>
-              <small>등록된 주차칸의 물체 점유 상태</small>
+              <strong>CCTV 분석</strong>
+              <small>주차면 점유 상태 확인</small>
             </span>
             <i data-lucide="chevron-down" aria-hidden="true"></i>
           </button>
           <section id="deviceCameraPanel" class="device-analysis-panel" aria-label="CCTV 주차면 객체 분석" hidden>
             <div class="device-analysis-heading">
-              <div>
-                <strong>실시간 객체 감지</strong>
-                <small>주차칸별 점유 현황</small>
-              </div>
+              <strong>분석 화면</strong>
               <span id="deviceModelBadge" class="device-model-badge">연결 대기</span>
             </div>
 
             <div class="device-analysis-toolbar" aria-label="실시간 객체 분석 시작">
               <button id="deviceStartCameraButton" class="device-primary-command" type="button">
                 <i data-lucide="scan-line" aria-hidden="true"></i>
-                <span>바로 분석하기</span>
+                <span>분석 시작</span>
               </button>
+              <a id="cameraCalibrationLink" class="device-setup-command" href="./calibrate.html" target="_blank" rel="noopener">
+                <i data-lucide="settings-2" aria-hidden="true"></i>
+                <span>CCTV 설정</span>
+              </a>
             </div>
             <button id="deviceSwitchCameraButton" type="button" hidden disabled></button>
             <input id="deviceSourceFile" type="file" accept="image/*,video/*" hidden>
@@ -472,44 +506,17 @@
               <canvas id="deviceResultCanvas" width="1280" height="720"></canvas>
               <div id="deviceViewportPlaceholder" class="device-viewport-placeholder">
                 <i data-lucide="camera" aria-hidden="true"></i>
-                <strong>분석 대기 중입니다.</strong>
-                <span>바로 분석하기를 누르면 CCTV 화면을 가져옵니다.</span>
+                <strong>CCTV 화면을 불러오세요</strong>
+                <span>분석 시작을 누르면 현재 화면을 가져옵니다.</span>
               </div>
               <span id="deviceSourceBadge" class="device-source-badge" hidden>기기 카메라</span>
             </div>
 
             <p id="deviceAnalysisStatus" class="device-analysis-status" role="status" aria-live="polite">
-              바로 분석하기를 눌러 시작하세요.
+              분석 시작을 눌러 주세요.
             </p>
-            <p id="deviceOccupancyStatus" class="device-analysis-status" role="status">바로 분석하기를 누르면 주차면 좌표를 자동 지정합니다.</p>
-            <a id="cameraCalibrationLink" class="secondary-button full-width-button" href="./calibrate.html" target="_blank" rel="noopener">CCTV 좌표 확인·보정</a>
+            <p id="deviceOccupancyStatus" class="device-analysis-status" role="status">등록된 주차면을 기준으로 분석합니다.</p>
           </section>
-          <button id="cameraSetupToggle" class="camera-setup-toggle" type="button" aria-expanded="false" aria-controls="cameraConnectionForm">
-            <i data-lucide="cctv" aria-hidden="true"></i>
-            <span>고정 CCTV 설정</span>
-            <i data-lucide="chevron-down" aria-hidden="true"></i>
-          </button>
-          <form id="cameraConnectionForm" class="camera-connection-form" hidden>
-            <label class="form-field">
-              <span>RTSP 카메라 링크</span>
-              <input id="cameraRtspUrl" type="password" placeholder="rtsp://사용자:비밀번호@카메라-IP:554/..." autocomplete="off" spellcheck="false">
-            </label>
-            <label id="cameraAdminTokenField" class="form-field" hidden>
-              관리자 토큰
-              <input id="cameraAdminToken" type="password" placeholder="PARKVIEW_ADMIN_TOKEN" autocomplete="off" spellcheck="false">
-            </label>
-            <div class="camera-connection-actions">
-              <button id="cameraConnectButton" class="primary-button full-width-button" type="submit">
-                <i data-lucide="link" aria-hidden="true"></i>
-                <span>링크 연결</span>
-              </button>
-              <button id="cameraOpenButton" class="secondary-button full-width-button" type="button" hidden>
-                <i data-lucide="external-link" aria-hidden="true"></i>
-                <span>VLC로 열기</span>
-              </button>
-            </div>
-            <p id="cameraConnectFeedback" class="camera-inline-status" role="status" aria-live="polite"></p>
-          </form>
           <p id="objectStatus" class="edge-system-message">분석 서비스를 확인하고 있습니다.</p>
         </section>
 
@@ -528,8 +535,9 @@
       document.write('<script src="./native-bridge-source.js?v=100"><\/script>');
     }
   </script>
-  <script src="./app.js?v=143"></script>
+  <script src="./search-discovery.js?v=1"></script>
+  <script src="./app.js?v=154"></script>
   <script src="./vendor/onnxruntime/ort.wasm.bundle.js?v=1"></script>
-  <script type="module" src="./camera-analysis.js?v=13"></script>
+  <script type="module" src="./camera-analysis.js?v=16"></script>
 </body>
 </html>

@@ -997,8 +997,8 @@ def publish_camera_frame(image_bytes: bytes, camera_name: str, floor_id: str) ->
             "Content-Length": str(len(image_bytes)),
             "X-ParkView-Relay-Secret": CAMERA_RELAY_SECRET,
             "X-ParkView-Viewer-Token": CAMERA_VIEWER_TOKEN,
-            "X-ParkView-Camera-Name": camera_name,
-            "X-ParkView-Floor-Id": floor_id,
+            "X-ParkView-Camera-Name": urllib.parse.quote(camera_name, safe=""),
+            "X-ParkView-Floor-Id": urllib.parse.quote(floor_id, safe=""),
         },
         method="POST",
     )
@@ -1621,8 +1621,13 @@ class ParkViewHandler(SimpleHTTPRequestHandler):
                 query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
                 detector = parking_vision.detect if query.get("method", [""])[0] == "lines" else parking_segmentation.detect
                 kwargs = {"roi": json.loads(query.get("roi", ["null"])[0])} if detector is parking_vision.detect else {}
+                image_bytes = (
+                    worker.preview_frame()
+                    if query.get("source", [""])[0] == "camera"
+                    else self.read_body(MAX_IMAGE_BYTES)
+                )
                 result = detector(
-                    self.read_body(MAX_IMAGE_BYTES),
+                    image_bytes,
                     query.get("lot_id", [""])[0],
                     query.get("floor_id", [""])[0],
                     **kwargs,

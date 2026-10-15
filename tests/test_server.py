@@ -84,6 +84,25 @@ class PublicRelayTests(unittest.TestCase):
         self.assertEqual((status, body), (200, b"test-frame"))
         self.assertEqual(self.request("GET", "/api/health")[0], 200)
 
+    def test_camera_region_detection_reuses_server_preview(self):
+        detected = {"slots": [], "source": "opencv_closed_lines"}
+        with mock.patch.object(server, "ADMIN_TOKEN_CONFIGURED", True), mock.patch.object(
+            server, "ADMIN_TOKEN", "test-token"
+        ), mock.patch.object(
+            server.worker, "preview_frame", return_value=b"camera-jpeg"
+        ) as preview, mock.patch.object(
+            server.parking_vision, "detect", return_value=detected
+        ) as detect:
+            status, _, body = self.request(
+                "POST",
+                "/api/regions/detect?lot_id=test&floor_id=1F&method=lines&source=camera",
+                {"Authorization": "Bearer test-token"},
+            )
+        self.assertEqual(status, 200)
+        self.assertIn(b"opencv_closed_lines", body)
+        preview.assert_called_once_with()
+        detect.assert_called_once_with(b"camera-jpeg", "test", "1F", roi=None)
+
 
 class RegionMatchingTests(unittest.TestCase):
     def test_all_yolo_classes_are_enabled_by_default(self):
@@ -240,6 +259,53 @@ class StabilityTests(unittest.TestCase):
 
 
 class CameraRuntimeTests(unittest.TestCase):
+    def setUp(self):
+        self.relay_patch = mock.patch.object(server, "CAMERA_RELAY_SECRET", "")
+        self.relay_patch.start()
+
+    def tearDown(self):
+        self.relay_patch.stop()
+
+    def test_preview_reuses_recent_frame_while_analysis_holds_lock(self):
+        worker = server.AnalysisWorker()
+        worker._camera_connected = True
+        worker._preview_bytes = b"recent-frame"
+        worker._preview_at = server.time.monotonic()
+        worker._analysis_lock.acquire()
+        try:
+            with mock.patch.object(server, "capture_camera_frame") as capture:
+                self.assertEqual(worker.preview_frame(), b"recent-frame")
+                capture.assert_not_called()
+        finally:
+            worker._analysis_lock.release()
+
+    def test_preview_waits_for_first_analysis_frame_without_recapturing(self):
+        worker = server.AnalysisWorker()
+        worker._analysis_lock.acquire()
+        results = []
+        thread = threading.Thread(target=lambda: results.append(worker.preview_frame()))
+        with mock.patch.object(server, "capture_camera_frame") as capture:
+            thread.start()
+            with worker._lock:
+                worker._camera_connected = True
+                worker._preview_bytes = b"first-frame"
+                worker._preview_at = server.time.monotonic()
+            worker._analysis_lock.release()
+            thread.join(timeout=2)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(results, [b"first-frame"])
+            capture.assert_not_called()
+
+    def test_stale_or_disconnected_preview_is_not_returned(self):
+        for connected in (False, True):
+            worker = server.AnalysisWorker()
+            worker._camera_connected = connected
+            worker._preview_bytes = b"old-frame"
+            worker._preview_at = server.time.monotonic() - (11 if connected else 0)
+            with mock.patch.object(worker, "_capture", return_value=(b"new-frame", {})) as capture:
+                self.assertEqual(worker.preview_frame(), b"new-frame")
+                capture.assert_called_once()
+
     @staticmethod
     def jpeg_frame(width=320, height=180):
         output = io.BytesIO()
@@ -260,6 +326,8 @@ class CameraRuntimeTests(unittest.TestCase):
         image_bytes = self.jpeg_frame()
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             server, "DEBUG_DIR", Path(directory)
+        ), mock.patch.object(
+            server, "CAMERA_SETTINGS_PATH", Path(directory) / "camera-settings.json"
         ), mock.patch.object(
             server, "capture_camera_frame", return_value=image_bytes
         ):
@@ -311,6 +379,8 @@ class CameraRuntimeTests(unittest.TestCase):
         image_bytes = self.jpeg_frame(640, 360)
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             server, "DEBUG_DIR", Path(directory)
+        ), mock.patch.object(
+            server, "CAMERA_SETTINGS_PATH", Path(directory) / "camera-settings.json"
         ), mock.patch.object(
             server, "capture_camera_frame", return_value=image_bytes
         ), mock.patch.object(worker, "start") as start:

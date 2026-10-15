@@ -126,7 +126,7 @@ test("device camera analysis is integrated into parking management", async () =>
   assert.match(html, /id="deviceCameraToggle"/);
   assert.match(html, /id="deviceCameraPanel"/);
   assert.match(html, /id="deviceStartCameraButton"/);
-  assert.match(html, /id="deviceStartCameraButton"[\s\S]*?바로 분석하기/);
+  assert.match(html, /id="deviceStartCameraButton"[\s\S]*?분석 시작/);
   assert.doesNotMatch(html, />\s*전환\s*</);
   assert.doesNotMatch(html, />\s*사진·영상\s*</);
   assert.doesNotMatch(html, />\s*중지\s*</);
@@ -257,10 +257,11 @@ test("unauthorized CCTV displays the token setup instruction without starting po
   assert.equal(h.elements.get("#deviceStartCameraButton").disabled, false);
 });
 
-test("GitHub Pages without a share link uses the device camera", async () => {
+test("GitHub Pages without a share link uses the configured CCTV server", async () => {
   const h = await cameraButtonHarness({ hostname: "jaden70749.github.io" });
   await h.click();
-  assert.equal(h.permissionRequests(), 1);
-  assert.equal(h.requests.length, 0);
-  assert.equal(vm.runInContext("state.sourceType", h.context), "camera");
+  assert.equal(h.permissionRequests(), 0);
+  assert.equal(h.requests.length, 1);
+  assert.match(h.requests[0].url, /^https:\/\/parkview-plan-api\.onrender\.com\/api\/camera\/preview\?t=/);
+  assert.equal(vm.runInContext("state.sourceType", h.context), "cctv");
 });

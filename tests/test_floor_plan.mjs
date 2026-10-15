@@ -83,6 +83,46 @@ function loadAppContext() {
   return context;
 }
 
+test("hosted page enables RTSP input and requires the administrator token", async () => {
+  const context = loadAppContext();
+  context.window.location.hostname = "parkview.example";
+  context.window.setTimeout = () => 0;
+  const cameraOpenButton = Object.assign(new FakeElement("button"), {
+    hidden: true,
+    querySelector: () => ({ textContent: "" })
+  });
+  context.statusElements = {
+    cameraConnectionForm: { hidden: true },
+    cameraSetupToggle: new FakeElement("button"),
+    cameraRtspUrl: Object.assign(new FakeElement("input"), {
+      disabled: true,
+      value: "rtsp://camera.example/stream",
+      focus() {}
+    }),
+    cameraConnectButton: Object.assign(new FakeElement("button"), {
+      disabled: true,
+      querySelector: () => ({ textContent: "" })
+    }),
+    cameraAdminTokenField: { hidden: false },
+    cameraAdminToken: { value: "", focus() {} },
+    cameraOpenButton,
+    cameraConnectFeedback: new FakeElement("p"),
+    cameraConnectionChip: new FakeElement("span"),
+    cameraStatus: new FakeElement("strong"),
+    cameraIntervalStatus: new FakeElement("strong"),
+    analysisStatus: new FakeElement("strong"),
+    objectStatus: new FakeElement("p")
+  };
+  vm.runInContext("Object.assign(els, statusElements); toggleCameraConnectionForm()", context);
+  context.statusElements.cameraRtspUrl.value = "rtsp://camera.example/stream";
+
+  assert.equal(context.statusElements.cameraRtspUrl.disabled, false);
+  assert.equal(context.statusElements.cameraConnectButton.disabled, false);
+  await vm.runInContext("connectCameraFromAdmin({preventDefault() {}})", context);
+  assert.equal(vm.runInContext("state.directCameraUrl", context), "");
+  assert.match(context.statusElements.cameraConnectFeedback.textContent, /관리자 토큰/);
+});
+
 test("adjacent rotated parking rows keep equal sizes without overlapping", () => {
   const context = loadAppContext();
   vm.runInContext("activeFloorPlanXScale = 1", context);
@@ -108,46 +148,39 @@ test("adjacent rotated parking rows keep equal sizes without overlapping", () =>
   });
 });
 
-test("camera plan replaces guessed counts and maps shuffled results only by ID", () => {
+test("camera results preserve the original floor plan and restore a previously replaced plan", () => {
   const context = loadAppContext();
   const backups = new Map();
-  context.localStorage = { setItem: (key, value) => backups.set(key, value) };
-  vm.runInContext(`state.floors = [{name: "1F", slots: Array.from({length:60}, () => ({status:"available"}))}];
+  context.localStorage = {
+    getItem: key => backups.get(key) || null,
+    setItem: (key, value) => backups.set(key, value)
+  };
+  vm.runInContext(`state.floors = [{name: "1F", layoutSource: "camera_polygons", slots: Array.from({length:73}, (_, i) => ({
+      cameraSlotId: "bay-"+i, cameraPolygon: [[.1,.1],[.2,.1],[.2,.2],[.1,.2]],
+      x: i, y: 0, w: 2, h: 1, rotation: 0, status: "available"
+    }))}];
     state.floorIndex = 0; state.selectedLot = {id:"lot"};
     refreshParkingStateViews = () => {};`, context);
+  const original = {
+    name: "1F", layoutSource: null, aspectRatio: 1.4, outline: [], zones: [], elements: [],
+    slots: Array.from({length:60}, (_, i) => ({
+      x: 10+(i%10)*7, y: 10+Math.floor(i/10)*12, w: 5, h: 10,
+      rotation: 90, kind: "normal", status: "available"
+    }))
+  };
+  backups.set("parkview-plan-backup:lot:1F", JSON.stringify(original));
   const results = Array.from({length:73}, (_, i) => ({
-    id: `bay-${i}`, slot_index: 999, status: i === 40 ? "occupied" : "empty", kind: "normal",
+    id: `bay-${i}`, slot_index: i, status: i === 40 ? "occupied" : "empty", kind: "normal",
     polygon: [[.1,.1],[.2,.1],[.2,.2],[.1,.2]]
   }));
   context.applyServerSlotResults(results);
-  let floor = vm.runInContext("state.floors[0]", context);
-  assert.equal(floor.slots.length,73);
-  assert.equal(floor.layoutSource,"camera_polygons");
-  assert.equal(backups.size,1);
-  assert.equal(JSON.parse([...backups.values()][0]).slots.length,60);
-  const shuffled = results.map(r => ({...r, status:r.id === "bay-3" ? "occupied" : "empty"})).reverse();
-  context.applyServerSlotResults(shuffled);
-  assert.equal(floor.slots.find(s => s.cameraSlotId === "bay-3").status,"occupied");
-  assert.equal(floor.slots.find(s => s.cameraSlotId === "bay-40").status,"available");
-  assert.equal(floor.slots[0].cameraSlotId,"bay-0");
-  const restored = context.normalizeStoredFloor(JSON.parse(JSON.stringify(floor)));
-  assert.equal(restored.layoutSource,"camera_polygons");
-  assert.equal(restored.slots[3].cameraSlotId,"bay-3");
-  const container = new FakeElement("div");
-  context.renderFloorPlan(container, restored, false);
-  const groups = container.children[0].children;
-  assert.equal(groups.length,73);
-  assert.equal(groups[3].attributes.get("data-camera-slot-id"),"bay-3");
-  assert.ok(groups[3].attributes.get("class").includes("occupied"));
-  groups.forEach(group => {
-    const rect = group.children.find(child => child.tagName === "rect");
-    assert.ok(Number(rect.attributes.get("width")) > 0);
-    assert.ok(Number(rect.attributes.get("height")) > 0);
-    assert.equal(rect.attributes.has("w"), false);
-    assert.equal(rect.attributes.has("h"), false);
-  });
-  assert.equal(context.cameraFloorSlots([results[0],results[0]]),null);
-  assert.equal(context.cameraFloorSlots([{...results[0],polygon:[[NaN,0],[1,0],[1,1]]}]),null);
+  const restored = vm.runInContext("state.floors[0]", context);
+  assert.equal(restored.slots.length,60);
+  assert.equal(restored.layoutSource,null);
+  assert.equal(restored.slots[0].x,10);
+  assert.equal(restored.slots[0].rotation,90);
+  assert.equal(restored.slots[40].status,"occupied");
+  assert.equal(restored.slots[41].status,"available");
 });
 
 test("perspective strips render as four straight top-down columns without losing IDs", () => {
@@ -186,7 +219,7 @@ test("console occupancy is numbered, distinguishes unknown, and deduplicates rep
   assert.equal(slots[0].slot_index,2);
 });
 
-test("direct camera links are validated without exposing an admin token", () => {
+test("deployed camera links use the protected camera API", () => {
   const context = loadAppContext();
   context.window.location.hostname = "jaden70749.github.io";
   context.cameraLink = "rtsp://camera-user:camera-password@192.168.0.26:554/stream";
@@ -195,7 +228,7 @@ test("direct camera links are validated without exposing an admin token", () => 
   vm.runInContext("saveDirectCameraLink(normalizeCameraLink(cameraLink))", context);
 
   assert.equal(normalized, context.cameraLink);
-  assert.equal(vm.runInContext("isDirectCameraMode()", context), true);
+  assert.equal(vm.runInContext("isDirectCameraMode()", context), false);
   assert.equal(vm.runInContext("loadDirectCameraLink()", context), context.cameraLink);
   assert.throws(
     () => vm.runInContext('normalizeCameraLink("javascript:alert(1)")', context),

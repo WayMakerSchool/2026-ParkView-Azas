@@ -62,6 +62,14 @@ RATE_LIMIT_WINDOW = max(60, int(os.environ.get("PARKVIEW_AI_RATE_WINDOW", "600")
 CAMERA_RELAY_SECRET = os.environ.get("PARKVIEW_CAMERA_RELAY_SECRET", "").strip()
 CAMERA_MAX_FRAME_BYTES = max(256 * 1024, int(os.environ.get("PARKVIEW_CAMERA_MAX_FRAME_BYTES", str(4 * 1024 * 1024))))
 CAMERA_FRAME_MAX_AGE_SECONDS = max(10, int(os.environ.get("PARKVIEW_CAMERA_FRAME_MAX_AGE", "90")))
+CORS_ALLOWED_HEADERS = (
+    "Authorization",
+    "Content-Type",
+    "X-ParkView-Relay-Secret",
+    "X-ParkView-Viewer-Token",
+    "X-ParkView-Camera-Name",
+    "X-ParkView-Floor-Id",
+)
 
 _rate_lock = threading.Lock()
 _rate_entries: dict[str, deque[float]] = defaultdict(deque)
@@ -201,7 +209,7 @@ def camera_viewer_allowed(identifier: str, token: str) -> bool:
 
 
 class EdgeApiHandler(BaseHTTPRequestHandler):
-    server_version = "ParkViewEdge/1.0"
+    server_version = "ParkViewEdge/1.1"
 
     def log_message(self, format: str, *args: Any) -> None:
         print(f"{self.address_string()} {format % args}", flush=True)
@@ -243,7 +251,7 @@ class EdgeApiHandler(BaseHTTPRequestHandler):
             return
         self.send_response(HTTPStatus.NO_CONTENT)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-ParkView-Relay-Secret, X-ParkView-Viewer-Token, X-ParkView-Camera-Name, X-ParkView-Floor-Id")
+        self.send_header("Access-Control-Allow-Headers", ", ".join(CORS_ALLOWED_HEADERS))
         self.send_header("Access-Control-Max-Age", "600")
         self.end_headers()
 
@@ -260,6 +268,7 @@ class EdgeApiHandler(BaseHTTPRequestHandler):
                     "geminiModels": GEMINI_MODELS,
                     "build": BUILD_COMMIT,
                     "cameraRelayConfigured": bool(CAMERA_RELAY_SECRET),
+                    "corsAuthorization": "Authorization" in CORS_ALLOWED_HEADERS,
                 },
             )
             return
@@ -339,8 +348,12 @@ class EdgeApiHandler(BaseHTTPRequestHandler):
                     _camera_frames[identifier] = {
                         "image": image, "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
                         "updated_at_epoch": now, "viewer_token_hash": token_hash,
-                        "camera": self.headers.get("X-ParkView-Camera-Name", "주차장 CCTV")[:80],
-                        "floor_id": self.headers.get("X-ParkView-Floor-Id", "B1")[:24],
+                        "camera": urllib.parse.unquote(
+                            self.headers.get("X-ParkView-Camera-Name", "")
+                        )[:80] or "주차장 CCTV",
+                        "floor_id": urllib.parse.unquote(
+                            self.headers.get("X-ParkView-Floor-Id", "")
+                        )[:24] or "B1",
                     }
                 self.send_json(HTTPStatus.OK, {"ok": True, "camera_id": identifier})
             except PermissionError as error:

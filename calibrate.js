@@ -9,17 +9,23 @@ const state = {
   dragging: null,
   mode: "region",
   candidates: null,
-  roi: null
+  roi: null,
+  cameraFrame: false
 };
+const CAMERA_ADMIN_TOKEN_STORAGE = "parkview.cameraAdminToken";
 const setupParams = new URLSearchParams(window.location.search);
 const setupLotId = (setupParams.get("lot_id") || "").trim();
-const isLocalCalibrationHost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-const cameraBase = isLocalCalibrationHost
-  ? String(window.PARKVIEW_CONFIG?.cameraApiBaseUrl || "").trim().replace(/\/+$/, "")
-  : "";
+const cameraBase = String(
+  window.PARKVIEW_CONFIG?.cameraApiBaseUrl || ""
+).trim().replace(/\/+$/, "");
 
 const els = {
   adminToken: document.querySelector("#adminToken"),
+  adminAuthDetails: document.querySelector("#adminAuthDetails"),
+  cameraConnectionForm: document.querySelector("#cameraConnectionForm"),
+  cameraRtspUrl: document.querySelector("#cameraRtspUrl"),
+  cameraConnectButton: document.querySelector("#cameraConnectButton"),
+  cameraConnectFeedback: document.querySelector("#cameraConnectFeedback"),
   frameFile: document.querySelector("#frameFile"),
   cameraFrameButton: document.querySelector("#cameraFrameButton"),
   sourceStatus: document.querySelector("#sourceStatus"),
@@ -40,6 +46,7 @@ els.detectButton = document.querySelector("#detectButton");
 els.applyDetectionButton = document.querySelector("#applyDetectionButton");
 els.discardDetectionButton = document.querySelector("#discardDetectionButton");
 els.modeButtons = document.querySelectorAll("[data-mode]");
+els.editingTools = document.querySelector(".editing-tools");
 
 const ctx = els.canvas.getContext("2d");
 
@@ -48,27 +55,28 @@ function currentFloorId() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  if (!isLocalCalibrationHost) {
-    const localUrl = new URL("http://127.0.0.1:5180/calibrate.html");
-    localUrl.search = window.location.search;
-    window.location.replace(localUrl.href);
-    return;
-  }
   els.floorId.value = setupParams.get("floor_id") || "B1";
   els.floorId.readOnly = true;
+  els.adminToken.value = loadAdminToken();
+  els.adminAuthDetails.open = !els.adminToken.value;
   document.querySelector("#trainingGroup").value = defaultTrainingGroup();
   bindEvents();
   render();
+  if (setupLotId && els.adminToken.value) loadRegions();
 });
 
 function bindEvents() {
   document.querySelector("#referenceButton").addEventListener("click", saveEmptyReference);
   document.querySelector("#trainingSampleButton").addEventListener("click", saveTrainingSample);
   document.querySelector("#reloadRegionsButton").addEventListener("click", loadRegions);
-  els.adminToken.addEventListener("change", loadRegions);
+  els.adminToken.addEventListener("change", () => {
+    saveAdminToken(els.adminToken.value.trim());
+    loadRegions();
+  });
+  els.cameraConnectionForm.addEventListener("submit", connectCamera);
   els.frameFile.addEventListener("change", async () => {
     const file = els.frameFile.files?.[0];
-    if (file) await loadImageBlob(file, file.name);
+    if (file) await loadImageBlob(file, file.name, false);
   });
   els.cameraFrameButton.addEventListener("click", loadCameraFrame);
   els.canvas.addEventListener("pointerdown", addCanvasPoint);
@@ -113,6 +121,79 @@ function bindEvents() {
 
 function regionsUrl(path = "/api/regions") {
   return `${cameraBase}${path}?${new URLSearchParams({ lot_id: setupLotId, floor_id: currentFloorId(), method: "lines", roi: JSON.stringify(state.roi) })}`;
+}
+
+function loadAdminToken() {
+  try {
+    return localStorage.getItem(CAMERA_ADMIN_TOKEN_STORAGE)
+      || sessionStorage.getItem(CAMERA_ADMIN_TOKEN_STORAGE)
+      || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function saveAdminToken(token) {
+  if (!token) return;
+  try {
+    localStorage.setItem(CAMERA_ADMIN_TOKEN_STORAGE, token);
+  } catch (_) {
+    try { sessionStorage.setItem(CAMERA_ADMIN_TOKEN_STORAGE, token); } catch (_) {}
+  }
+}
+
+async function connectCamera(event) {
+  event.preventDefault();
+  const token = els.adminToken.value.trim();
+  let url = els.cameraRtspUrl.value.trim();
+  if (token.length < 20) {
+    els.adminAuthDetails.open = true;
+    els.cameraConnectFeedback.textContent = "관리자 인증이 필요합니다.";
+    els.adminToken.focus();
+    return;
+  }
+  if (url) {
+    try {
+      const parsed = new URL(url);
+      if (!["rtsp:", "rtsps:"].includes(parsed.protocol) || !parsed.hostname) throw new Error();
+      url = parsed.href;
+    } catch (_) {
+      els.cameraConnectFeedback.textContent = "올바른 RTSP 카메라 링크를 입력하세요.";
+      els.cameraRtspUrl.focus();
+      return;
+    }
+  }
+  const endpoint = `${cameraBase}${url ? "/api/camera/configure" : "/api/camera/test"}`;
+  const previousLabel = els.cameraConnectButton.textContent;
+  els.cameraConnectButton.disabled = true;
+  els.cameraConnectButton.textContent = "연결 확인 중";
+  els.cameraConnectFeedback.textContent = "CCTV 프레임을 확인하고 있습니다.";
+  try {
+    const request = {
+      method: "POST",
+      headers: authHeaders({ Accept: "application/json" }),
+      signal: AbortSignal.timeout(30000)
+    };
+    if (url) {
+      request.headers["Content-Type"] = "application/json";
+      request.body = JSON.stringify({ url, name: "주차장 CCTV", floor_id: currentFloorId() });
+    }
+    const response = await fetch(endpoint, request);
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    saveAdminToken(token);
+    els.adminAuthDetails.open = false;
+    els.cameraRtspUrl.value = "";
+    const resolution = result.image?.width && result.image?.height
+      ? `${result.image.width}×${result.image.height}` : "프레임 수신";
+    els.cameraConnectFeedback.textContent = `CCTV 연결 완료 · ${resolution}`;
+    await loadCameraFrame();
+  } catch (error) {
+    els.cameraConnectFeedback.textContent = `연결 실패: ${error.message}`;
+  } finally {
+    els.cameraConnectButton.disabled = false;
+    els.cameraConnectButton.textContent = previousLabel;
+  }
 }
 
 async function saveEmptyReference() {
@@ -244,13 +325,13 @@ async function loadCameraFrame() {
       const payload = await response.json().catch(() => ({}));
       throw new Error(payload.error || `HTTP ${response.status}`);
     }
-    await loadImageBlob(await response.blob(), "CCTV 현재 프레임");
+    await loadImageBlob(await response.blob(), "CCTV 현재 프레임", true);
   } catch (error) {
     els.sourceStatus.textContent = `프레임을 불러오지 못했습니다: ${error.message}`;
   }
 }
 
-async function loadImageBlob(blob, label) {
+async function loadImageBlob(blob, label, cameraFrame = false) {
   const image = new Image();
   const url = URL.createObjectURL(blob);
   try {
@@ -260,6 +341,7 @@ async function loadImageBlob(blob, label) {
       image.src = url;
     });
     state.image = image;
+    state.cameraFrame = cameraFrame;
     state.candidates = null;
     state.dragging = null;
     state.points = [];
@@ -352,28 +434,38 @@ async function detectRegions() {
   const sourceImage = state.image;
   detectionStatus("주차면 감지 중...");
   try {
-    const imageCanvas = document.createElement("canvas");
-    imageCanvas.width = state.image.naturalWidth;
-    imageCanvas.height = state.image.naturalHeight;
-    imageCanvas.getContext("2d").drawImage(state.image, 0, 0);
-    const blob = await new Promise(resolve => imageCanvas.toBlob(resolve, "image/jpeg", 0.94));
-    if (!blob) throw new Error("사진을 변환하지 못했습니다. 프레임을 다시 불러와 주세요.");
-    const response = await fetch(regionsUrl("/api/regions/detect"), {
-      method: "POST", headers: authHeaders({ "Content-Type": "image/jpeg" }), body: blob,
+    const detectUrl = new URL(regionsUrl("/api/regions/detect"), window.location.href);
+    const request = {
+      method: "POST",
+      headers: authHeaders(),
       signal: AbortSignal.timeout(30000)
-    });
+    };
+    if (state.cameraFrame) {
+      detectUrl.searchParams.set("source", "camera");
+    } else {
+      const imageCanvas = document.createElement("canvas");
+      imageCanvas.width = state.image.naturalWidth;
+      imageCanvas.height = state.image.naturalHeight;
+      imageCanvas.getContext("2d").drawImage(state.image, 0, 0);
+      const blob = await new Promise(resolve => imageCanvas.toBlob(resolve, "image/jpeg", 0.94));
+      if (!blob) throw new Error("사진을 변환하지 못했습니다. 프레임을 다시 불러와 주세요.");
+      request.headers["Content-Type"] = "image/jpeg";
+      request.body = blob;
+    }
+    const response = await fetch(detectUrl.href, request);
     const result = await response.json();
     if (state.image !== sourceImage) throw new Error("이미지가 변경되었습니다. 새 이미지에서 다시 감지해 주세요.");
     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
     if (!result.slots?.length) throw new Error("감지된 주차면이 없습니다. 기존 좌표는 유지됩니다.");
     state.candidates = result.slots;
-    detectionStatus(`${result.slots.length}면 감지됨. 아래 감지 결과 적용을 누른 뒤 좌표를 저장해 주세요.`);
+    const restored = Number(result.inferred_count) || 0;
+    detectionStatus(`${result.slots.length}면 감지됨${restored ? ` · 끊긴 구획 ${restored}면 복원` : ""}. 아래 감지 결과 적용을 누른 뒤 좌표를 저장해 주세요.`);
     render();
   } catch (error) {
     detectionStatus(`자동 감지 실패: ${error.message}`);
   } finally {
     els.detectButton.disabled = false;
-    els.detectButton.textContent = "구획선으로 주차면 찾기";
+    els.detectButton.textContent = "주차면 자동 감지";
   }
 }
 
@@ -636,6 +728,7 @@ function renderSlotList() {
       els.slotNumber.value = String(slot.slot_index+1);
       state.mode = "edit";
       state.points = [];
+      els.editingTools.open = true;
       els.modeButtons.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === "edit")));
       drawCanvas();
     };
